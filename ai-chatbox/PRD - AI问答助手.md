@@ -145,9 +145,9 @@ graph TD
 ```mermaid
 graph LR
     A[用户浏览器] -->|HTTP/WebSocket| B[Web服务器]
-    B -->|调用| C[Claude Agent SDK]
-    C -->|API| D[Anthropic Claude API]
-    B -->|读写| E[本地存储/数据库]
+    B -->|SDK Session| C[Claude Agent SDK]
+    C -->|Local Process| D[Claude CLI]
+    D -->|HTTPS| E[External API (OpenAI/Anthropic Compatible)]
     
     style C fill:#667eea,color:#fff
     style D fill:#764ba2,color:#fff
@@ -159,7 +159,8 @@ graph LR
 |-----|---------|------|
 | **前端** | HTML + CSS + JavaScript | 轻量级，无需构建 |
 | **后端** | Node.js + Express | 成熟稳定的 Web 框架 |
-| **AI引擎** | Claude Agent SDK | Anthropic 官方生产级 SDK |
+| **AI引擎** | Claude Agent SDK + Local CLI | **关键架构**：通过本地 CLI 进程实现更强的环境控制能力 |
+| **API适配** | Env Config | 支持 OpenAI/Anthropic 兼容的第三方 API |
 | **数据存储** | SQLite / JSON 文件 | 轻量级本地存储 |
 
 ### 4.3 为什么选择 Claude Agent SDK？

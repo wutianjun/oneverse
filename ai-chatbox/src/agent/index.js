@@ -1,41 +1,53 @@
-const Anthropic = require('@anthropic-ai/sdk');
+const { unstable_v2_createSession } = require('@anthropic-ai/claude-agent-sdk');
 const config = require('./config');
+const path = require('path');
 require('dotenv').config();
 
-// 初始化 Anthropic Client
-// SDK 会自动读取 ANTHROPIC_API_KEY，也可以显式传入
-const client = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-    baseURL: process.env.ANTHROPIC_BASE_URL, // 关键：支持第三方代理地址
-    // 添加默认请求头以降低被拦截风险
-    defaultHeaders: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-});
+// 全局 Session 实例 (单例模式)
+let globalSession = null;
 
 /**
- * 处理一次性消息
+ * 获取或创建 Session
  */
-exports.processMessage = async (userMessage) => {
+async function getSession() {
+    if (globalSession) return globalSession;
+
     try {
-        const response = await client.messages.create({
+        // 构造本地 claude CLI 的绝对路径
+        const executablePath = path.resolve(process.cwd(), 'node_modules', '.bin', 'claude');
+
+        console.log('Initializing Agent Session...');
+        console.log('Executable:', executablePath);
+
+        globalSession = unstable_v2_createSession({
             model: config.AGENT_CONFIG.model,
-            max_tokens: config.AGENT_CONFIG.max_tokens,
-            temperature: config.AGENT_CONFIG.temperature,
-            system: config.SYSTEM_PROMPT,
-            messages: [
-                { role: "user", content: userMessage }
-            ]
+            pathToClaudeCodeExecutable: executablePath,
+            // 关键：将当前环境变量（包含 API Key 和 Base URL）传递给 CLI 进程
+            env: {
+                ...process.env,
+                ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+                ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY
+            },
+            includePartialMessages: true // 尝试开启流式增量
         });
 
-        return {
-            reply: response.content[0].text,
-            usage: response.usage
-        };
+        return globalSession;
+
     } catch (error) {
-        console.error('Anthropic API error:', error);
+        console.error('Failed to create session:', error);
         throw error;
     }
+}
+
+/**
+ * 处理一次性消息 (兼容老接口)
+ */
+exports.processMessage = async (userMessage) => {
+    let fullText = '';
+    await exports.processStreamMessage(userMessage, (chunk) => {
+        fullText += chunk;
+    });
+    return { reply: fullText };
 };
 
 /**
@@ -43,26 +55,49 @@ exports.processMessage = async (userMessage) => {
  */
 exports.processStreamMessage = async (userMessage, onChunk) => {
     try {
-        const stream = await client.messages.create({
-            model: config.AGENT_CONFIG.model,
-            max_tokens: config.AGENT_CONFIG.max_tokens,
-            temperature: config.AGENT_CONFIG.temperature,
-            system: config.SYSTEM_PROMPT,
-            messages: [
-                { role: "user", content: userMessage }
-            ],
-            stream: true
-        });
+        const session = await getSession();
 
-        for await (const chunk of stream) {
-            if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
-                onChunk(chunk.delta.text);
+        // 1. 发送消息
+        await session.send(userMessage);
+
+        const stream = session.stream();
+
+        // 追踪当前消息 ID 和已发送长度，用于计算 Delta
+        let currentMessageId = null;
+        let lastLength = 0;
+
+        for await (const message of stream) {
+            // 适配 SDK 实际结构: message.message 是核心对象
+            const innerMessage = message.message || message;
+
+            if (message.type === 'assistant' || message.type === 'assistant_message') {
+
+                // 检查是否是同一条消息
+                if (innerMessage.uuid && innerMessage.uuid !== currentMessageId) {
+                    currentMessageId = innerMessage.uuid;
+                    lastLength = 0; // 重置
+                }
+
+                if (innerMessage.content && Array.isArray(innerMessage.content)) {
+                    const fullText = innerMessage.content
+                        .filter(c => c.type === 'text')
+                        .map(c => c.text)
+                        .join('');
+
+                    if (fullText) {
+                        // 计算增量
+                        const delta = fullText.slice(lastLength);
+                        if (delta) {
+                            onChunk(delta);
+                            lastLength = fullText.length;
+                        }
+                    }
+                }
             }
         }
 
     } catch (error) {
-        console.error('Anthropic stream error:', error);
-        // 抛出错误以便上层处理 (SSE error event)
+        console.error('Agent Stream Error:', error);
         throw error;
     }
 };

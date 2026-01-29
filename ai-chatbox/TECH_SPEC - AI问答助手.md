@@ -10,31 +10,33 @@
 
 ### 1.1 整体架构
 
-系统采用经典的前后端分离架构 (B/S)，后端作为核心，集成 Claude Agent SDK 处理智能对话逻辑。
+系统采用经典的前后端分离架构 (B/S)，后端集成 Claude Agent SDK，通过本地 CLI 进程与外部 API 通信。
 
 ```mermaid
 graph TD
     User[用户终端]
     Frontend[前端 SPA (HTML/JS)]
     Backend[后端 API 服务 (Node.js/Express)]
-    AgentRuntime[Claude Agent Runtime]
-    ClaudeAPI[Anthropic API]
+    AgentSDK[Claude Agent SDK (Node.js)]
+    CLI[Local Claude CLI (Seperate Process)]
+    ExternalAPI[第三方/官方 AI API]
 
-    User <-->|HTTP/REST| Frontend
+    User <-->|HTTP/REST / SSE| Frontend
     Frontend <-->|REST API / SSE| Backend
-    Backend <-->|Agent SDK Interface| AgentRuntime
-    AgentRuntime <-->|RPC/HTTPS| ClaudeAPI
+    Backend <-->|SDK Session| AgentSDK
+    AgentSDK <-->|Spawn/Stdio| CLI
+    CLI <-->|HTTPS (Custom BaseURL)| ExternalAPI
 ```
 
 ### 1.2 技术栈选型
 
 | 模块 | 技术 | 版本要求 | 说明 |
 | :--- | :--- | :--- | :--- |
-| **Runtime** | Node.js | >= v20.0.0 | 确保支持最新的 ES 特性和 SDK 需求 |
-| **Web Framework** | Express | ^4.18.0 | 轻量级、成熟的 Web 服务框架 |
-| **AI SDK** | @anthropic-ai/claude-agent-sdk | Latest | **核心组件**：提供 Agent 编排、工具调用管理 |
-| **Frontend** | Vanilla JS + CSS | - | 保持轻量，无需构建工具链 |
-| **Streaming** | Server-Sent Events (SSE) | - | 实现打字机效果的流式响应 |
+| **Runtime** | Node.js | >= v20.0.0 | 运行环境 |
+| **Web Framework** | Express | ^4.18.0 | Web 服务框架 |
+| **AI SDK** | @anthropic-ai/claude-agent-sdk | Latest | **核心组件**: 提供 Agent 会话管理 |
+| **CLI Tool** | @anthropic-ai/claude-code | Latest | **底层运行时**: 负责实际的 API 调用和工具执行 |
+| **Frontend** | Vanilla JS + CSS | - | 轻量级前端 |
 
 ---
 
@@ -42,82 +44,45 @@ graph TD
 
 ### 2.1 目录结构
 
-```
-ai-chatbox/
-├── src/
-│   ├── agent/              # Agent 核心逻辑
-│   │   ├── config.js       # Agent 配置 (System prompt, tools)
-│   │   └── index.js        # Agent 实例封装
-│   ├── server/
-│   │   ├── app.js          # Express App 配置
-│   │   ├── routes.js       # 路由定义
-│   │   └── controller.js   # 业务逻辑控制器
-│   └── utils/
-│       └── logger.js       # 日志工具
-├── public/                 # 前端静态资源
-│   ├── index.html          # 主页面
-│   ├── styles.css          # 样式表
-│   └── script.js           # 前端逻辑
-├── package.json
-└── .env                    # 环境变量 (API Keys)
-```
+(保持不变)
 
 ### 2.2 API 接口设计
 
-#### 2.2.1 提交问题 (普通模式)
-- **Endpoint**: `POST /api/chat`
-- **Content-Type**: `application/json`
-- **Request Body**:
-  ```json
-  {
-    "message": "帮我写一个 Python 冒泡排序"
-  }
-  ```
-- **Response**:
-  ```json
-  {
-    "reply": "好的，这是 Python 冒泡排序的代码...",
-    "usage": { "input_tokens": 50, "output_tokens": 150 }
-  }
-  ```
-
-#### 2.2.2 提交问题 (流式模式 - 推荐)
-- **Endpoint**: `GET /api/chat/stream`
-- **Query Params**: `?message=encoded_message`
-- **Protocol**: Server-Sent Events (SSE)
-- **Event format**:
-  - `event: message` -> `data: { "delta": "好的" }`
-  - `event: end` -> `data: [DONE]`
+(保持不变)
 
 ### 2.3 Agent SDK 集成方案
 
-根据 Anthropic Agent SDK 的最佳实践，我们将创建一个持久化的 Agent 实例（或按请求创建轻量级实例），并配置核心工具。
+本系统使用 `unstable_v2_createSession` API 来创建与 Agent 的会话。关键在于利用 SDK 调用本地安装的 `claude` CLI，并通过环境变量注入配置。
 
-**核心代码逻辑 (伪代码/通过 SDK 实现):**
+**核心代码逻辑 (src/agent/index.js):**
 
 ```javascript
-// src/agent/index.js
-import { Agent } from '@anthropic-ai/claude-agent-sdk';
+const { unstable_v2_createSession } = require('@anthropic-ai/claude-agent-sdk');
+const path = require('path');
 
-export async function createAgent() {
-  const agent = new Agent({
-    name: "AI-Assistant",
-    model: "claude-3-5-sonnet-20241022",
-    tools: [
-       // 在此扩展自定义工具，如 web_search, file_read 等
-    ],
-    systemPrompt: "你是一个乐于助人的专业 AI 助手..."
-  });
-  return agent;
-}
+// 单例模式管理 Session
+let globalSession = null;
 
-export async function processMessage(userMessage) {
-  const agent = await createAgent();
-  const response = await agent.run({
-    input: userMessage,
-    stream: true // 开启流式支持
-  });
-  return response;
+async function getSession() {
+    if (globalSession) return globalSession;
+
+    // 1. 定位本地 CLI 可执行文件
+    const executablePath = path.resolve(process.cwd(), 'node_modules', '.bin', 'claude');
+
+    // 2. 创建会话，注入环境变量以支持第三方 API
+    globalSession = unstable_v2_createSession({
+        model: process.env.ANTHROPIC_MODEL,
+        pathToClaudeCodeExecutable: executablePath,
+        env: {
+            // 透传当前进程的环境变量
+            ...process.env, 
+            // 显式指定 BaseURL，解决 Cloudflare 拦截问题
+            ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL 
+        },
+        includePartialMessages: true // 开启流式增量支持
+    });
+    
+    return globalSession;
 }
 ```
 

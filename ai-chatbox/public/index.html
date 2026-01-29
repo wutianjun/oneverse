@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,6 +8,7 @@
     <link rel="stylesheet" href="styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
+
 <body>
     <div class="app-container">
         <!-- 侧边栏 -->
@@ -23,7 +25,7 @@
                 <div class="history-item active">当前对话</div>
             </div>
             <div class="sidebar-footer">
-                <p>基于 Claude Agent SDK</p>
+                <p>基于 Anthropic SDK</p>
             </div>
         </aside>
 
@@ -39,7 +41,7 @@
                     <div class="welcome-icon">🤖</div>
                     <h2>你好！我是你的 AI 助手</h2>
                     <p>我可以帮你写代码、解答问题或提供创意。</p>
-                    
+
                     <div class="suggestion-grid">
                         <button class="suggestion-card" onclick="setInput('帮我写一个 Python 冒泡排序')">
                             <span class="icon">💻</span>
@@ -63,15 +65,13 @@
 
             <div class="input-area">
                 <div class="input-wrapper">
-                    <textarea 
-                        id="userInput" 
-                        placeholder="输入你的问题... (Shift + Enter 换行)"
-                        rows="1"
-                        oninput="autoResize(this)"
-                    ></textarea>
+                    <textarea id="userInput" placeholder="输入你的问题... (Shift + Enter 换行)" rows="1"
+                        oninput="autoResize(this)"></textarea>
                     <button id="sendBtn" onclick="sendMessage()">
-                        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M22 2L11 13M22 2L15 22L11 13L2 9L22 2Z" stroke-linecap="round" stroke-linejoin="round"/>
+                        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M22 2L11 13M22 2L15 22L11 13L2 9L22 2Z" stroke-linecap="round"
+                                stroke-linejoin="round" />
                         </svg>
                     </button>
                 </div>
@@ -83,4 +83,5 @@
     </div>
     <script src="script.js"></script>
 </body>
+
 </html>
