@@ -1,5 +1,5 @@
-这是在main分支修改的内容
+这是在conflict-test分支修改的内容
 
-XXXXX
-XXXXX
+XXXXX124
+XXXXX1234
 WIFI
